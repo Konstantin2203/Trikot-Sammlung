@@ -63,6 +63,20 @@
   .group td:first-child { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar { height: 4px; background: var(--accent); border-radius: 2px; opacity: .6; margin-top: 3px; }
   .top li { padding: 3px 0; font-size: .9rem; }
+  .flock { font-size: .85rem; font-weight: 600; color: var(--accent); }
+  #printArea { display: none; }
+  @media print {
+    body { background: #fff; color: #000; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; }
+    #printArea h1 { font-size: 1.4rem; margin-bottom: 2px; }
+    #printArea .sub { color: #555; font-size: .85rem; margin-bottom: 12px; }
+    .pitem { display: grid; grid-template-columns: 90px 1fr; gap: 12px; padding: 8px 0; border-top: 1px solid #ccc; break-inside: avoid; }
+    .pitem .pimg { width: 90px; height: 90px; background: #eee center/cover no-repeat; border-radius: 4px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pitem h3 { margin: 0 0 2px; font-size: 1rem; }
+    .pitem .meta { color: #444; font-size: .8rem; }
+    .pitem .flock { color: #000; }
+  }
 </style>
 </head>
 <body>
@@ -73,6 +87,7 @@
   </div>
   <div class="actions">
     <button id="statsBtn">📊 Auswertung</button>
+    <button id="printBtn">🖨 Drucken</button>
     <button id="exportBtn">Export</button>
     <button id="importBtn">Import</button>
     <button class="primary" id="addBtn">+ Trikot hinzufügen</button>
@@ -136,6 +151,7 @@
 </dialog>
 
 <input type="file" id="importFile" accept="application/json" hidden>
+<div id="printArea"></div>
 
 <script>
 const TYPES = ["Heim", "Auswärts", "Ausweich", "Torwart", "Retro", "Sonstige"];
@@ -215,6 +231,7 @@ function render() {
         <h3>${esc(j.club)}</h3>
         <div class="meta">${esc([j.season, j.type, j.size].filter(Boolean).join(" · "))}</div>
         <div class="meta">${esc([j.country, j.league].filter(Boolean).join(" · "))}</div>
+        ${j.player ? `<div class="flock">Flock: ${esc(j.player)}</div>` : ""}
         ${j.price != null ? `<div class="meta price">${eur(j.price)}</div>` : ""}
         <span class="badge ${j.vatti ? "ok" : ""}">${j.vatti ? "✓ Vatti kennt es" : "Vatti noch nicht"}</span>
       </div>
@@ -285,7 +302,8 @@ function openView(id) {
     ${j.photo ? `<img class="preview" src="${j.photo}" alt="">` : ""}
     <h2>${esc(j.club)}</h2>
     <div class="meta">${esc([j.country, j.league].filter(Boolean).join(" · "))}</div>
-    <div class="meta">${esc([j.season, j.type, j.size && "Größe " + j.size, j.condition, j.player].filter(Boolean).join(" · "))}</div>
+    <div class="meta">${esc([j.season, j.type, j.size && "Größe " + j.size, j.condition].filter(Boolean).join(" · "))}</div>
+    ${j.player ? `<div class="flock">Flock: ${esc(j.player)}</div>` : ""}
     <div class="meta">${j.price != null ? `<span class="price">${eur(j.price)}</span> · ` : ""}${j.vatti ? "✓ Vatti schon präsentiert" : "Vatti noch nicht präsentiert"}</div>
     ${j.description ? `<div class="desc">${esc(j.description)}</div>` : ""}
     <div class="actions">
@@ -379,6 +397,24 @@ function renderStats() {
       </ol></div>
     </div>`;
 }
+
+$("printBtn").onclick = () => {
+  const all = [...jerseys].sort((a, b) => a.club.localeCompare(b.club, "de") || (a.season || "").localeCompare(b.season || ""));
+  const sum = all.reduce((a, j) => a + (j.price ?? 0), 0);
+  $("printArea").innerHTML = `<h1>Meine Trikotsammlung</h1>
+    <div class="sub">${all.length} Trikots · Gesamtwert ${eur(sum)} · Stand ${new Date().toLocaleDateString("de-DE")}</div>
+    ${all.map(j => `<div class="pitem">
+      <div class="pimg" style="${j.photo ? `background-image:url(${j.photo})` : ""}"></div>
+      <div>
+        <h3>${esc(j.club)}</h3>
+        <div class="meta">${esc([j.season, j.type, j.size && "Größe " + j.size, j.condition].filter(Boolean).join(" · "))}</div>
+        <div class="meta">${esc([j.country, j.league].filter(Boolean).join(" · "))}</div>
+        ${j.player ? `<div class="meta flock">Flock: ${esc(j.player)}</div>` : ""}
+        ${j.price != null ? `<div class="meta">${eur(j.price)}</div>` : ""}
+        ${j.description ? `<div class="meta">${esc(j.description)}</div>` : ""}
+      </div></div>`).join("")}`;
+  window.print();
+};
 
 $("statsBtn").onclick = () => {
   const on = $("stats").hidden;
