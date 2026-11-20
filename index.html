@@ -13,6 +13,7 @@
     :root { --bg: #14161a; --card: #1e2128; --text: #eceef2; --muted: #98a2b3; --border: #2e333d; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
   header { padding: 24px 16px 8px; max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
   h1 { margin: 0; font-size: 1.6rem; }
@@ -42,6 +43,26 @@
   .actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   .preview { width: 100%; max-height: 360px; object-fit: contain; border-radius: 8px; background: var(--border); }
   .desc { white-space: pre-wrap; line-height: 1.5; }
+  .badge { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 99px; background: var(--border); color: var(--muted); margin-top: 6px; }
+  .badge.ok { background: #d1f2de; color: #14532d; }
+  .price { font-weight: 600; color: var(--text); }
+  label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: .95rem; }
+  label.check input { width: auto; }
+  #stats { max-width: 1100px; margin: 0 auto; padding: 8px 16px 40px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .kpi b { display: block; font-size: 1.4rem; }
+  .kpi span { color: var(--muted); font-size: .8rem; }
+  .groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  .group { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .group h3 { margin: 0 0 10px; font-size: 1rem; }
+  .group table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .group th { text-align: right; color: var(--muted); font-weight: 500; padding: 2px 4px; }
+  .group th:first-child, .group td:first-child { text-align: left; }
+  .group td { padding: 4px; text-align: right; border-top: 1px solid var(--border); position: relative; }
+  .group td:first-child { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { height: 4px; background: var(--accent); border-radius: 2px; opacity: .6; margin-top: 3px; }
+  .top li { padding: 3px 0; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -51,15 +72,21 @@
     <div class="count" id="count"></div>
   </div>
   <div class="actions">
+    <button id="statsBtn">📊 Auswertung</button>
     <button id="exportBtn">Export</button>
     <button id="importBtn">Import</button>
     <button class="primary" id="addBtn">+ Trikot hinzufügen</button>
   </div>
 </header>
 
-<div class="toolbar">
+<div class="toolbar" id="toolbar">
   <input id="search" type="search" placeholder="Suchen (Verein, Saison, Beschreibung …)">
   <select id="typeFilter"><option value="">Alle Arten</option></select>
+  <select id="vattiFilter">
+    <option value="">Vatti: alle</option>
+    <option value="yes">Vatti: präsentiert</option>
+    <option value="no">Vatti: noch nicht</option>
+  </select>
   <select id="sort">
     <option value="new">Neueste zuerst</option>
     <option value="club">Verein A–Z</option>
@@ -68,11 +95,17 @@
 </div>
 
 <main id="grid"></main>
+<section id="stats" hidden></section>
 
 <dialog id="formDlg">
   <form class="dlg" id="form" method="dialog">
     <h2 id="formTitle">Neues Trikot</h2>
     <label>Verein / Nationalmannschaft *<input name="club" required></label>
+    <div class="row">
+      <label>Land<input name="country" list="dl-country" placeholder="z. B. Deutschland"></label>
+      <label>Liga<input name="league" list="dl-league" placeholder="z. B. Bundesliga"></label>
+    </div>
+    <datalist id="dl-country"></datalist><datalist id="dl-league"></datalist>
     <div class="row">
       <label>Saison<input name="season" placeholder="z. B. 2014/15"></label>
       <label>Art<select name="type"></select></label>
@@ -82,6 +115,10 @@
       <label>Zustand<select name="condition">
         <option>Neu mit Etikett</option><option>Sehr gut</option><option>Gut</option><option>Gebraucht</option>
       </select></label>
+    </div>
+    <div class="row">
+      <label>Preis (€)<input name="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00"></label>
+      <label class="check" style="align-self:end;padding-bottom:8px"><input type="checkbox" name="vatti"> Vatti schon präsentiert</label>
     </div>
     <label>Spieler / Flock<input name="player" placeholder="z. B. Müller 25"></label>
     <label>Beschreibung<textarea name="description" rows="4" placeholder="Geschichte, Besonderheiten, wo gekauft …"></textarea></label>
@@ -148,6 +185,7 @@ async function init() {
   }
   render();
 }
+const eur = n => Number(n).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 TYPES.forEach(t => {
@@ -160,12 +198,15 @@ function render() {
   const tf = $("typeFilter").value;
   let list = jerseys.filter(j =>
     (!tf || j.type === tf) &&
-    (!q || [j.club, j.season, j.player, j.description, j.type].join(" ").toLowerCase().includes(q)));
+    (!$("vattiFilter").value || !!j.vatti === ($("vattiFilter").value === "yes")) &&
+    (!q || [j.club, j.country, j.league, j.season, j.player, j.description, j.type].join(" ").toLowerCase().includes(q)));
   const s = $("sort").value;
   list.sort((a, b) =>
     s === "club" ? a.club.localeCompare(b.club, "de") :
     s === "season" ? (b.season || "").localeCompare(a.season || "") :
     b.created - a.created);
+  updateLists();
+  if (!$("stats").hidden) renderStats();
   $("count").textContent = `${jerseys.length} Trikot${jerseys.length === 1 ? "" : "s"} in der Sammlung`;
   $("grid").innerHTML = list.length ? list.map(j => `
     <div class="card" data-id="${j.id}">
@@ -173,6 +214,9 @@ function render() {
       <div class="info">
         <h3>${esc(j.club)}</h3>
         <div class="meta">${esc([j.season, j.type, j.size].filter(Boolean).join(" · "))}</div>
+        <div class="meta">${esc([j.country, j.league].filter(Boolean).join(" · "))}</div>
+        ${j.price != null ? `<div class="meta price">${eur(j.price)}</div>` : ""}
+        <span class="badge ${j.vatti ? "ok" : ""}">${j.vatti ? "✓ Vatti kennt es" : "Vatti noch nicht"}</span>
       </div>
     </div>`).join("") : `<div class="empty">${jerseys.length ? "Keine Treffer." : "Noch keine Trikots – füge dein erstes hinzu!"}</div>`;
 }
@@ -183,7 +227,9 @@ function openForm(j) {
   const f = $("form");
   f.reset();
   $("formTitle").textContent = j ? "Trikot bearbeiten" : "Neues Trikot";
-  for (const k of ["club", "season", "type", "size", "condition", "player", "description"]) if (j?.[k]) f[k].value = j[k];
+  for (const k of ["club", "country", "league", "season", "type", "size", "condition", "player", "description"]) if (j?.[k]) f[k].value = j[k];
+  if (j?.price != null) f.price.value = j.price;
+  f.vatti.checked = !!j?.vatti;
   $("formPreview").hidden = !photoData;
   $("formPreview").src = photoData;
   $("formDlg").showModal();
@@ -217,7 +263,9 @@ $("form").photo.addEventListener("change", async e => {
 $("form").addEventListener("submit", () => {
   const f = $("form");
   const data = {
-    club: f.club.value.trim(), season: f.season.value.trim(), type: f.type.value,
+    club: f.club.value.trim(), country: f.country.value.trim(), league: f.league.value.trim(),
+    price: f.price.value === "" ? null : Math.max(0, parseFloat(f.price.value) || 0),
+    vatti: f.vatti.checked, season: f.season.value.trim(), type: f.type.value,
     size: f.size.value.trim(), condition: f.condition.value, player: f.player.value.trim(),
     description: f.description.value.trim(), photo: photoData,
   };
@@ -236,7 +284,9 @@ function openView(id) {
   $("viewBody").innerHTML = `
     ${j.photo ? `<img class="preview" src="${j.photo}" alt="">` : ""}
     <h2>${esc(j.club)}</h2>
+    <div class="meta">${esc([j.country, j.league].filter(Boolean).join(" · "))}</div>
     <div class="meta">${esc([j.season, j.type, j.size && "Größe " + j.size, j.condition, j.player].filter(Boolean).join(" · "))}</div>
+    <div class="meta">${j.price != null ? `<span class="price">${eur(j.price)}</span> · ` : ""}${j.vatti ? "✓ Vatti schon präsentiert" : "Vatti noch nicht präsentiert"}</div>
     ${j.description ? `<div class="desc">${esc(j.description)}</div>` : ""}
     <div class="actions">
       <button class="danger" id="delBtn">Löschen</button>
@@ -260,7 +310,7 @@ $("grid").addEventListener("click", e => {
 });
 $("addBtn").onclick = () => openForm();
 $("cancelForm").onclick = () => $("formDlg").close();
-["search", "typeFilter", "sort"].forEach(id => $(id).addEventListener("input", render));
+["search", "typeFilter", "vattiFilter", "sort"].forEach(id => $(id).addEventListener("input", render));
 
 $("exportBtn").onclick = () => {
   const a = document.createElement("a");
@@ -278,6 +328,66 @@ $("importFile").addEventListener("change", async e => {
   } catch { alert("Ungültige Datei."); }
   e.target.value = "";
 });
+
+function updateLists() {
+  const fill = (id, key) => $(id).innerHTML = [...new Set(jerseys.map(j => j[key]).filter(Boolean))].sort()
+    .map(v => `<option value="${esc(v)}">`).join("");
+  fill("dl-country", "country"); fill("dl-league", "league");
+}
+
+function groupBy(key, label) {
+  const m = new Map();
+  for (const j of jerseys) {
+    const k = (typeof key === "function" ? key(j) : j[key]) || "– keine Angabe –";
+    const g = m.get(k) || { n: 0, sum: 0, priced: 0 };
+    g.n++;
+    if (j.price != null) { g.sum += j.price; g.priced++; }
+    m.set(k, g);
+  }
+  const rows = [...m].sort((a, b) => b[1].sum - a[1].sum || b[1].n - a[1].n || a[0].localeCompare(b[0], "de"));
+  const max = Math.max(...rows.map(r => r[1].sum), 1);
+  return `<div class="group"><h3>Nach ${label}</h3><table>
+    <tr><th>${label}</th><th>Anzahl</th><th>Wert</th><th>Ø</th></tr>
+    ${rows.map(([k, g]) => `<tr><td title="${esc(k)}">${esc(k)}<div class="bar" style="width:${g.sum / max * 100}%"></div></td>
+      <td>${g.n}</td><td>${eur(g.sum)}</td><td>${g.priced ? eur(g.sum / g.priced) : "–"}</td></tr>`).join("")}
+  </table></div>`;
+}
+
+function renderStats() {
+  const priced = jerseys.filter(j => j.price != null);
+  const sum = priced.reduce((a, j) => a + j.price, 0);
+  const shown = jerseys.filter(j => j.vatti).length;
+  const kpi = (v, l) => `<div class="kpi"><b>${v}</b><span>${l}</span></div>`;
+  const top = [...priced].sort((a, b) => b.price - a.price).slice(0, 5);
+  const seasonKey = j => j.season;
+  $("stats").innerHTML = `<div class="kpis">
+      ${kpi(jerseys.length, "Trikots")}
+      ${kpi(eur(sum), "Gesamtwert")}
+      ${kpi(priced.length ? eur(sum / priced.length) : "–", "Ø Preis")}
+      ${kpi(priced.length ? eur(Math.max(...priced.map(j => j.price))) : "–", "Teuerstes Trikot")}
+      ${kpi(`${shown} / ${jerseys.length}`, "Vatti präsentiert")}
+      ${kpi(jerseys.length - priced.length, "ohne Preisangabe")}
+      ${kpi(new Set(jerseys.map(j => j.country).filter(Boolean)).size, "Länder")}
+      ${kpi(new Set(jerseys.map(j => j.club.toLowerCase())).size, "Vereine")}
+    </div>
+    <div class="groups">
+      ${groupBy("country", "Land")}${groupBy("league", "Liga")}${groupBy("club", "Verein")}
+      ${groupBy(seasonKey, "Saison")}${groupBy("type", "Art")}${groupBy("condition", "Zustand")}
+      ${groupBy("size", "Größe")}${groupBy(j => j.vatti ? "Präsentiert" : "Noch nicht", "Vatti")}
+      <div class="group"><h3>Top 5 teuerste</h3><ol class="top">
+        ${top.map(j => `<li>${esc(j.club)} ${esc(j.season || "")} – <b>${eur(j.price)}</b></li>`).join("") || "<li>Noch keine Preise erfasst.</li>"}
+      </ol></div>
+    </div>`;
+}
+
+$("statsBtn").onclick = () => {
+  const on = $("stats").hidden;
+  $("stats").hidden = !on;
+  $("grid").hidden = on;
+  $("toolbar").hidden = on;
+  $("statsBtn").textContent = on ? "← Sammlung" : "📊 Auswertung";
+  if (on) renderStats();
+};
 
 init();
 </script>
